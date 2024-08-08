@@ -49,7 +49,7 @@ This repository contains a Python script that automates the e-filing process for
 1. **Run the script:**
 
     ```sh
-    python Efiling_Automation.py
+    python E-filing_Automation.py
     ```
 
 2. **Interact with the GUI:**
