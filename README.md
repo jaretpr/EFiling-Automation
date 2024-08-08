@@ -56,3 +56,8 @@ This repository contains a Python script that automates the e-filing process for
 
     - Click the "Start Process" button to begin the e-filing process.
     - The log output will be displayed in the GUI.
+  
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+
