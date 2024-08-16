@@ -1,25 +1,25 @@
-import re
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
-from openpyxl import load_workbook
+import customtkinter as ctk
 import os
-import tkinter as tk
-from tkinter import scrolledtext
+import re
+import threading
 import time
 from datetime import datetime
+from openpyxl import load_workbook
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.webdriver.support import expected_conditions as EC
+from tkinter import messagebox
 
-# Mapping of attorney initials to login credentials
 credentials = {
     "ATTORNEY1": {"user": "USERNAME1", "pass": "PASSWORD1"},
     "ATTORNEY2": {"user": "USERNAME2", "pass": "PASSWORD2"},
     "ATTORNEY3": {"user": "USERNAME3", "pass": "PASSWORD3"},
-    # Add more as needed
 }
+
+lock = threading.Lock()  # Thread lock to manage access to shared resources
 
 def get_court_value(court_name):
     court_dict = {
@@ -134,7 +134,6 @@ def get_court_value(court_name):
         "Wyandotte County District Court": "122910",
     }
 
-    # Special cases for specific prefixes
     prefix_court_mapping = {
         "CLA - Cowley County District Court": "Cowley-Arkansas City District Court",
         "CLW - Cowley County District Court": "Cowley-Winfield District Court",
@@ -231,155 +230,187 @@ def clean_case_number(case_number):
     return case_number
 
 def start_efiling():
-    log_widget.insert(tk.END, "Starting e-filing process...\n")
-    
-    chrome_options = Options()
-    chrome_options.add_argument("--start-maximized")
-    service = Service(executable_path="path/to/chromedriver")
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    
-    driver.get("https://example.com/portal/")
-    wait = WebDriverWait(driver, 20)
-    
-    current_date = datetime.now().strftime('%m.%d.%y')
-    wb_path = fr'path/to/excel/file/{current_date} Garn Returns.xlsx'
-    
-    if not os.path.exists(wb_path):
-        log_widget.insert(tk.END, f"File not found: {wb_path}\n")
-        driver.quit()
-        return
-
-    try:
-        wb = load_workbook(wb_path)
-        sheet = wb.active
+    with lock:
+        log_widget.insert(ctk.END, "Starting e-filing process...\n")
         
-        for row in sheet.iter_rows(min_row=2, max_row=sheet.max_row):
-            court_file_no = row[0].value
-            debtor_number = row[1].value
-            court_name = row[3].value
-            note = row[4].value
-            completed = row[5]
-            attorney_initials = row[6].value
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")  # Run Chrome in headless mode
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--window-size=1920,1080")
+        service = Service(executable_path="path/to/chromedriver")
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        driver.get("https://example.com/portal/")
+        wait = WebDriverWait(driver, 20)
+        
+        current_date = datetime.now().strftime('%m.%d.%y')
+        wb_path = fr'path/to/excel/file/{current_date} Garn Returns.xlsx'
+        
+        if not os.path.exists(wb_path):
+            log_widget.insert(ctk.END, f"File not found: {wb_path}\n")
+            driver.quit()
+            return
 
-            if completed.value == "Yes":
-                continue
-
-            if court_file_no is None or debtor_number is None or court_name is None or note is None:
-                log_widget.insert(tk.END, f"Skipping row with missing data: {row}\n")
-                continue
-                
-            if attorney_initials in credentials:
-                user = credentials[attorney_initials]["user"]
-                password = credentials[attorney_initials]["pass"]
-            else:
-                log_widget.insert(tk.END, f"Unknown attorney initials: {attorney_initials}\n")
-                continue
-                
-            wait.until(EC.presence_of_element_located((By.ID, "userName"))).send_keys(user)
-            wait.until(EC.presence_of_element_located((By.ID, "password"))).send_keys(password)
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input.sbttn[value='Log In']"))).click()
-
-            cleaned_case_number = clean_case_number(strip_prefix(court_file_no))
-
-            wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Cases"))).click()
-            wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "My Cases"))).click()
-
-            wait.until(EC.presence_of_element_located((By.ID, "caseNumber"))).send_keys(cleaned_case_number)
-
-            court_value = get_court_value(court_name)
-            if court_value == "Unknown Court":
-                log_widget.insert(tk.END, f"Unknown court: {court_name}\n")
-                continue
-
-            court_select = Select(wait.until(EC.presence_of_element_located((By.ID, "wkLocation"))))
-            court_select.select_by_value(court_value)
-
-            wait.until(EC.element_to_be_clickable((By.NAME, "eFile"))).click()
-
-            category_select = Select(wait.until(EC.element_to_be_clickable((By.ID, "categories"))))
-            category_select.select_by_value("121")
-
-            doc_type_select = Select(wait.until(EC.element_to_be_clickable((By.ID, "ftDocDefId"))))
-            found = False
-            for option in doc_type_select.options:
-                if "Return of Service" in option.text:
-                    doc_type_select.select_by_visible_text(option.text)
-                    found = True
-                    break
-            if not found:
-                log_widget.insert(tk.END, "Document type for Return of Service not found.\n")
-                driver.quit()
-                return
-
-            title = format_document_title(note, court_name)
-            wait.until(EC.presence_of_element_located((By.ID, "postDescription"))).send_keys(title)
-
-            file_type_prefix = 'GJ' if 'bank' in note.lower() else 'GI'
-            file_name = f"{file_type_prefix}{int(debtor_number):010}.pdf"
-            file_path = os.path.join(r"path/to/pdf/files", file_name)
+        try:
+            wb = load_workbook(wb_path)
+            sheet = wb.active
             
-            if not os.path.exists(file_path):
-                file_name = f"{file_type_prefix}{int(debtor_number):010}_001.pdf"
+            for row in sheet.iter_rows(min_row=2, max_row=sheet.max_row):
+                court_file_no = row[0].value
+                debtor_number = row[1].value
+                court_name = row[3].value
+                note = row[4].value
+                completed = row[5]
+                attorney_initials = row[6].value
+
+                if completed.value == "Yes":
+                    continue
+
+                if court_file_no is None or debtor_number is None or court_name is None or note is None:
+                    log_widget.insert(ctk.END, f"Skipping row with missing data: {row}\n")
+                    continue
+                    
+                if attorney_initials in credentials:
+                    user = credentials[attorney_initials]["user"]
+                    password = credentials[attorney_initials]["pass"]
+                else:
+                    log_widget.insert(ctk.END, f"Unknown attorney initials: {attorney_initials}\n")
+                    continue
+                    
+                wait.until(EC.presence_of_element_located((By.ID, "userName"))).send_keys(user)
+                wait.until(EC.presence_of_element_located((By.ID, "password"))).send_keys(password)
+                wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input.sbttn[value='Log In']"))).click()
+
+                cleaned_case_number = clean_case_number(strip_prefix(court_file_no))
+
+                wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "Cases"))).click()
+                wait.until(EC.element_to_be_clickable((By.LINK_TEXT, "My Cases"))).click()
+
+                wait.until(EC.presence_of_element_located((By.ID, "caseNumber"))).send_keys(cleaned_case_number)
+
+                court_value = get_court_value(court_name)
+                if court_value == "Unknown Court":
+                    log_widget.insert(ctk.END, f"Unknown court: {court_name}\n")
+                    continue
+
+                court_select = Select(wait.until(EC.presence_of_element_located((By.ID, "wkLocation"))))
+                court_select.select_by_value(court_value)
+
+                wait.until(EC.element_to_be_clickable((By.NAME, "eFile"))).click()
+
+                category_select = Select(wait.until(EC.element_to_be_clickable((By.ID, "categories"))))
+                category_select.select_by_value("121")
+
+                doc_type_select = Select(wait.until(EC.element_to_be_clickable((By.ID, "ftDocDefId"))))
+                found = False
+                for option in doc_type_select.options:
+                    if "Return of Service" in option.text:
+                        doc_type_select.select_by_visible_text(option.text)
+                        found = True
+                        break
+                if not found:
+                    log_widget.insert(ctk.END, "Document type for Return of Service not found.\n")
+                    driver.quit()
+                    return
+
+                title = format_document_title(note, court_name)
+                wait.until(EC.presence_of_element_located((By.ID, "postDescription"))).send_keys(title)
+
+                file_type_prefix = 'GJ' if 'bank' in note.lower() else 'GI'
+                file_name = f"{file_type_prefix}{int(debtor_number):010}.pdf"
                 file_path = os.path.join(r"path/to/pdf/files", file_name)
                 
                 if not os.path.exists(file_path):
-                    log_widget.insert(tk.END, f"File not found: {file_path}\n")
-                    continue
+                    file_name = f"{file_type_prefix}{int(debtor_number):010}_001.pdf"
+                    file_path = os.path.join(r"path/to/pdf/files", file_name)
                     
-            wait.until(EC.presence_of_element_located((By.ID, "Filename"))).send_keys(os.path.abspath(file_path))
-            wait.until(EC.element_to_be_clickable((By.ID, "addButton"))).click()
-            
-            wait.until(EC.element_to_be_clickable((By.ID, "nextButton"))).click()
-            
-            stripped_debtor_number = debtor_number.strip()
+                    if not os.path.exists(file_path):
+                        log_widget.insert(ctk.END, f"File not found: {file_path}\n")
+                        continue
+                        
+                wait.until(EC.presence_of_element_located((By.ID, "Filename"))).send_keys(os.path.abspath(file_path))
+                wait.until(EC.element_to_be_clickable((By.ID, "addButton"))).click()
+                
+                wait.until(EC.element_to_be_clickable((By.ID, "nextButton"))).click()
+                
+                stripped_debtor_number = debtor_number.strip()
 
-            wait.until(EC.presence_of_element_located((By.ID, "FilersCaseNumber"))).send_keys(stripped_debtor_number)
-            
-            wait.until(EC.presence_of_element_located((By.NAME, "piiCheckBox"))).click()
-            
-            wait.until(EC.presence_of_element_located((By.ID, "submitButton"))).click()
-            
-            WebDriverWait(driver, 10).until(EC.alert_is_present())
-            alert = driver.switch_to.alert
-            alert.accept()
+                wait.until(EC.presence_of_element_located((By.ID, "FilersCaseNumber"))).send_keys(stripped_debtor_number)
+                
+                wait.until(EC.presence_of_element_located((By.NAME, "piiCheckBox"))).click()
+                
+                wait.until(EC.presence_of_element_located((By.ID, "submitButton"))).click()
+                
+                WebDriverWait(driver, 10).until(EC.alert_is_present())
+                alert = driver.switch_to.alert
+                alert.accept()
 
-            completed.value = "Yes"
-            wb.save(wb_path)
-            
-            log_widget.insert(tk.END, f"Processed document for case: {cleaned_case_number}\n")
+                completed.value = "Yes"
+                wb.save(wb_path)
+                
+                log_widget.insert(ctk.END, f"Processed document for case: {cleaned_case_number}\n")
 
-            driver.get("https://example.com/portal/")
-            wait.until(EC.presence_of_element_located((By.ID, "userName")))
+                driver.get("https://example.com/portal/")
+                wait.until(EC.presence_of_element_located((By.ID, "userName")))
 
-    except Exception as e:
-        log_widget.insert(tk.END, f"An error occurred: {str(e)}\n")
-    
-    finally:
-        driver.quit()
-        log_widget.insert(tk.END, "E-filing process completed.\n")
+        except Exception as e:
+            log_widget.insert(ctk.END, f"An error occurred: {str(e)}\n")
+        
+        finally:
+            driver.quit()
+            log_widget.insert(ctk.END, "E-filing process completed.\n")
 
-# Tkinter GUI setup
-root = tk.Tk()
+def start_efiling_threaded():
+    threading.Thread(target=start_efiling).start()
+
+def update_credentials():
+    for initials, entry_widgets in entries.items():
+        credentials[initials]["user"] = entry_widgets["user"].get().strip()
+        credentials[initials]["pass"] = entry_widgets["pass"].get().strip()
+
+    messagebox.showinfo("Success", "Credentials updated.")
+
+# Tkinter GUI setup with customtkinter
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
+
+root = ctk.CTk()
 root.title("Garnishment Service Returns")
-root.geometry("600x600")
-root.configure(bg='#2d2d30')
+root.geometry("600x400")
 
-frame = tk.Frame(root, padx=20, pady=20, bg='#2d2d30')
-frame.pack(expand=True, fill=tk.BOTH)
+container_frame = ctk.CTkFrame(root)
+container_frame.pack(expand=True, fill=ctk.BOTH, padx=20, pady=20)
 
-title_label = tk.Label(frame, text="File Uploader", font=("Arial", 16, "bold"), fg="white", bg="#2d2d30")
-title_label.grid(row=0, column=0, columnspan=2, pady=10, sticky="n")
+title_label = ctk.CTkLabel(container_frame, text="File Uploader", font=("Segoe UI", 24))
+title_label.grid(row=0, column=0, columnspan=3, pady=10, padx=10, sticky="n")
 
-button_style = {"font": ("Arial", 12), "padx": 5, "pady": 5, "bg": "#1c97ea", "fg": "white", "relief": tk.RAISED, "borderwidth": 2}
-log_style = {"bg": "#1e1e1e", "fg": "white", "borderwidth": 2, "relief": tk.RAISED}
+btn_upload = ctk.CTkButton(container_frame, text="Start Process", command=start_efiling_threaded, font=("Segoe UI", 16))
+btn_upload.grid(row=1, column=0, columnspan=3, pady=10, padx=10, sticky="ew")
 
-btn_upload = tk.Button(frame, text="Start Process", command=start_efiling, **button_style)
-btn_upload.grid(row=1, column=0, pady=5, padx=10, sticky="ew")
+log_widget = ctk.CTkTextbox(container_frame, wrap="word", font=("Segoe UI", 12), height=10)
+log_widget.grid(row=2, column=0, columnspan=3, pady=10, padx=10, sticky="nsew")
 
-log_widget = scrolledtext.ScrolledText(frame, wrap=tk.WORD, height=20, font=("Arial", 10), **log_style)
-log_widget.grid(row=2, column=0, columnspan=2, pady=5, padx=5, sticky="nsew")
+entries = {}
+row = 3
+for initials, info in credentials.items():
+    ctk.CTkLabel(container_frame, text=initials, font=("Segoe UI", 14)).grid(row=row, column=0, sticky="w", padx=(40, 5))
+    user_entry = ctk.CTkEntry(container_frame, font=("Segoe UI", 14))
+    user_entry.insert(0, info["user"])
+    user_entry.grid(row=row, column=1, padx=(5, 20), pady=5, sticky="ew")
+    pass_entry = ctk.CTkEntry(container_frame, font=("Segoe UI", 14), show='*')
+    pass_entry.insert(0, info["pass"])
+    pass_entry.grid(row=row, column=2, padx=(5, 20), pady=5, sticky="ew")
+    entries[initials] = {"user": user_entry, "pass": pass_entry}
+    row += 1
 
-frame.grid_columnconfigure(0, weight=1)
-frame.grid_rowconfigure(2, weight=1)
+update_btn = ctk.CTkButton(container_frame, text="Update Credentials", command=update_credentials, font=("Segoe UI", 16))
+update_btn.grid(row=row, column=0, columnspan=3, pady=10, padx=10, sticky="ew")
+
+container_frame.grid_columnconfigure(0, weight=1)
+container_frame.grid_columnconfigure(1, weight=1)
+container_frame.grid_columnconfigure(2, weight=1)
+container_frame.grid_rowconfigure(2, weight=1)
 
 root.mainloop()
