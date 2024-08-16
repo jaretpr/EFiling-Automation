@@ -1,13 +1,14 @@
 # Automated E-Filing Script
 
-This repository contains a Python script that automates the e-filing process for garnishment service returns using Selenium and Tkinter. The script logs into a court portal, uploads documents, and updates a status spreadsheet.
+This repository contains a Python script that automates the e-filing process for garnishment service returns using Selenium and customtkinter. The script logs into a court portal, uploads documents, updates a status spreadsheet, and provides an intuitive GUI for easy interaction, including managing attorney credentials.
 
 ## Features
 
-- Automated login to the court portal
-- File uploading and form submission
-- Status updates in an Excel workbook
-- Tkinter-based GUI for easy interaction
+- **Automated Login:** Logs into the court portal using attorney credentials.
+- **File Uploading and Form Submission:** Automates the process of uploading garnishment service return documents and submitting forms on the court portal.
+- **Status Updates:** Updates the status of filings in an Excel workbook.
+- **Attorney Credential Management:** Allows for easy updates to attorney credentials via the GUI.
+- **CustomTkinter-based GUI:** Provides an easy-to-use interface for starting the e-filing process and managing credentials.
 
 ## Prerequisites
 
@@ -56,6 +57,10 @@ This repository contains a Python script that automates the e-filing process for
 
     - Click the "Start Process" button to begin the e-filing process.
     - The log output will be displayed in the GUI.
+  
+## Screenshots
+
+![UI](pics/UI.png)
   
 ## License
 
